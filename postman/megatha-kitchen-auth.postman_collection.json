@@ -1,0 +1,88 @@
+{
+  "info": {
+    "name": "Megatha Kitchen - Auth (better-auth)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Sign-in/session/sign-out flow for the Express + better-auth backend. Run requests top to bottom inside one Postman session so the session cookie carries over. Every request sends an Origin header matching trustedOrigins — better-auth requires it whenever a session cookie is present (Postman doesn't send Origin automatically like a real browser does)."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "0. Health Check",
+      "request": {
+        "method": "GET",
+        "url": "{{baseUrl}}/health"
+      }
+    },
+    {
+      "name": "1. Sign In (owner)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Origin", "value": "http://localhost:3000" }
+        ],
+        "url": "{{baseUrl}}/api/auth/sign-in/email",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"owner@warungbagas.id\",\n  \"password\": \"Owner#12345\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Get Session (should return owner)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+        "url": "{{baseUrl}}/api/auth/get-session"
+      }
+    },
+    {
+      "name": "3. Sign Out",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+        "url": "{{baseUrl}}/api/auth/sign-out"
+      }
+    },
+    {
+      "name": "4. Get Session (after sign-out, expect null)",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+        "url": "{{baseUrl}}/api/auth/get-session"
+      }
+    },
+    {
+      "name": "5. Sign In (wrong password, expect 401)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Origin", "value": "http://localhost:3000" }
+        ],
+        "url": "{{baseUrl}}/api/auth/sign-in/email",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"owner@warungbagas.id\",\n  \"password\": \"wrongpassword\"\n}"
+        }
+      }
+    },
+    {
+      "name": "6. Sign Up (should be blocked, expect 400)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Origin", "value": "http://localhost:3000" }
+        ],
+        "url": "{{baseUrl}}/api/auth/sign-up/email",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"hacker@evil.com\",\n  \"password\": \"whatever123\",\n  \"name\": \"Hacker\",\n  \"role\": \"owner\"\n}"
+        }
+      }
+    }
+  ]
+}

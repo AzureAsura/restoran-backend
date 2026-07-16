@@ -1,0 +1,332 @@
+{
+  "info": {
+    "name": "Megatha Kitchen - Core Features (Menu, Booking, Table)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Menu (public), Booking (public + admin), Table (admin) flow for the Express backend. Run requests top to bottom inside one Postman session so the session cookie carries over — Postman's cookie jar is shared across collections for the same domain, so signing in here (or in the auth collection) is enough for every admin request below. Every request that touches the session cookie sends an Origin header matching trustedOrigins, since Postman (unlike a browser) doesn't send Origin automatically."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000", "type": "string" },
+    { "key": "booking_id", "value": "", "type": "string" },
+    { "key": "booking_table_id", "value": "", "type": "string" },
+    { "key": "new_table_id", "value": "", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "0. Setup",
+      "item": [
+        {
+          "name": "0.1 Health Check",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/health"
+          }
+        },
+        {
+          "name": "0.2 Sign In (owner)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/api/auth/sign-in/email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"owner@warungbagas.id\",\n  \"password\": \"Owner#12345\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1. Menu (Public)",
+      "item": [
+        {
+          "name": "1.1 Get Menu (all)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/menu"
+          }
+        },
+        {
+          "name": "1.2 Get Menu (filter: category)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/menu?category=Makanan"
+          }
+        },
+        {
+          "name": "1.3 Get Menu (filter: tag=best_seller)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/menu?tag=best_seller"
+          }
+        },
+        {
+          "name": "1.4 Get Menu (search)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/menu?search=nasi"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Booking (Public)",
+      "item": [
+        {
+          "name": "2.1 Create Booking (valid)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('booking_id', data.booking_id);",
+                  "  pm.collectionVariables.set('booking_table_id', data.table.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"Budi Santoso\",\n  \"customer_phone\": \"081234567890\",\n  \"party_size\": 4,\n  \"booking_date\": \"2026-07-10\",\n  \"booking_time\": \"19:00\",\n  \"area_preference\": \"indoor\",\n  \"special_requests\": \"Dekat jendela\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2.2 Create Booking (invalid phone, expect 400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"Bad Phone\",\n  \"customer_phone\": \"12345\",\n  \"party_size\": 2,\n  \"booking_date\": \"2026-07-10\",\n  \"booking_time\": \"19:00\"\n}"
+            }
+          }
+        },
+        {
+          "name": "2.3 Create Booking (past date, expect 400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/bookings",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_name\": \"Past Date\",\n  \"customer_phone\": \"081211112222\",\n  \"party_size\": 2,\n  \"booking_date\": \"2020-01-01\",\n  \"booking_time\": \"19:00\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Booking (Admin)",
+      "item": [
+        {
+          "name": "3.1 List Bookings (by date)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/bookings?date=2026-07-10"
+          }
+        },
+        {
+          "name": "3.2 List Bookings (filter: status=confirmed)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/bookings?date=2026-07-10&status=confirmed"
+          }
+        },
+        {
+          "name": "3.3 List Bookings (filter: area=indoor)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/bookings?date=2026-07-10&area=indoor"
+          }
+        },
+        {
+          "name": "3.4 List Bookings (search)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/bookings?date=2026-07-10&search=budi"
+          }
+        },
+        {
+          "name": "3.5 Update Booking Status -> seated",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/admin/bookings/{{booking_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"seated\"\n}"
+            }
+          }
+        },
+        {
+          "name": "3.6 Update Booking Status (invalid value, expect 400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/admin/bookings/{{booking_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"invalid_status\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Table (Admin)",
+      "item": [
+        {
+          "name": "4.1 List Tables",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/tables"
+          }
+        },
+        {
+          "name": "4.2 Create Table (valid)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "  const data = pm.response.json().data;",
+                  "  pm.collectionVariables.set('new_table_id', data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/admin/tables",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Meja Test Postman\",\n  \"area\": \"indoor\",\n  \"capacity\": 4\n}"
+            }
+          }
+        },
+        {
+          "name": "4.3 Create Table (invalid capacity, expect 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/admin/tables",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad\",\n  \"area\": \"indoor\",\n  \"capacity\": 0\n}"
+            }
+          }
+        },
+        {
+          "name": "4.4 Create Table (invalid area, expect 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/admin/tables",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad\",\n  \"area\": \"rooftop\",\n  \"capacity\": 4\n}"
+            }
+          }
+        },
+        {
+          "name": "4.5 Update Table -> status maintenance",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/admin/tables/{{new_table_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"maintenance\"\n}"
+            }
+          }
+        },
+        {
+          "name": "4.6 Update Table (empty body, expect 400)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Origin", "value": "http://localhost:3000" }
+            ],
+            "url": "{{baseUrl}}/admin/tables/{{new_table_id}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          }
+        },
+        {
+          "name": "4.7 Delete Table (new table, expect 204)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/tables/{{new_table_id}}"
+          }
+        },
+        {
+          "name": "4.8 Delete Table (in use by booking, expect 409)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/tables/{{booking_table_id}}"
+          }
+        },
+        {
+          "name": "4.9 Sign Out",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/api/auth/sign-out"
+          }
+        },
+        {
+          "name": "4.10 List Tables (after sign-out, expect 401)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Origin", "value": "http://localhost:3000" }],
+            "url": "{{baseUrl}}/admin/tables"
+          }
+        }
+      ]
+    }
+  ]
+}

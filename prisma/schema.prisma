@@ -1,0 +1,253 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Restaurant {
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
+  description   String?
+  address       String?
+  phone         String?
+  email         String?
+  openingHours  Json     @map("opening_hours") // { "monday": "08:00-22:00", ... }
+  timezone      String   @default("Asia/Jakarta")
+  logoUrl       String?  @map("logo_url")
+  coverImageUrl String?  @map("cover_image_url")
+  settings      Json     @default("{}") // { hold_time_minutes, tax_rate, service_charge }
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tables         Table[]
+  bookings       Booking[]
+  menuCategories MenuCategory[]
+  menuItems      MenuItem[]
+  orders         Order[]
+
+  @@map("restaurants")
+}
+
+model Table {
+  id           String   @id @default(uuid())
+  restaurantId String   @map("restaurant_id")
+  name         String   // "Meja 1"
+  area         String   // 'indoor' | 'outdoor'
+  capacity     Int
+  status       String   @default("available") // available | reserved | occupied | maintenance
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  bookings   Booking[]
+  orders     Order[]
+
+  @@map("tables")
+}
+
+model Customer {
+  id            String    @id @default(uuid())
+  phone         String    @unique
+  name          String?
+  email         String?
+  preferences   Json      @default("{}") // { preferred_area, dietary: [] }
+  totalVisits   Int       @default(0) @map("total_visits")
+  totalSpent    Int       @default(0) @map("total_spent")
+  noShowCount   Int       @default(0) @map("no_show_count")
+  lastVisitDate DateTime? @map("last_visit_date")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  bookings Booking[]
+
+  @@map("customers")
+}
+
+model Booking {
+  id              String   @id @default(uuid())
+  bookingCode     String   @unique @map("booking_code") // e.g. "WB-10072026-001"
+  restaurantId    String   @map("restaurant_id")
+  customerId      String?  @map("customer_id")
+  customerName    String   @map("customer_name")
+  customerPhone   String   @map("customer_phone")
+  tableId         String?  @map("table_id")
+  partySize       Int      @map("party_size")
+  bookingDate     DateTime @map("booking_date") @db.Date
+  bookingTime     DateTime @map("booking_time") @db.Time
+  areaPreference  String?  @map("area_preference") // indoor | outdoor | no_preference
+  specialRequests String?  @map("special_requests")
+  status          String   @default("confirmed") // confirmed | seated | completed | no_show | cancelled
+  source          String   @default("web") // web | walk_in | phone
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  customer   Customer?  @relation(fields: [customerId], references: [id])
+  table      Table?     @relation(fields: [tableId], references: [id])
+  orders     Order[]
+
+  @@index([bookingDate])
+  @@index([status])
+  @@index([customerPhone])
+  @@index([tableId, bookingDate, bookingTime])
+  // Anti double-book: dijaga juga secara aplikatif via transaction check
+  // karena partial unique index (where status in confirmed/seated) tidak
+  // didukung langsung oleh Prisma — dibuat via raw migration SQL (lihat backend.md §7.3).
+  @@map("bookings")
+}
+
+model MenuCategory {
+  id           String  @id @default(uuid())
+  restaurantId String  @map("restaurant_id")
+  name         String
+  sortOrder    Int     @default(0) @map("sort_order")
+  isActive     Boolean @default(true) @map("is_active")
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id])
+  menuItems  MenuItem[]
+
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id           String   @id @default(uuid())
+  restaurantId String   @map("restaurant_id")
+  categoryId   String   @map("category_id")
+  name         String
+  price        Int
+  description  String?
+  imageUrl     String?  @map("image_url") // Cloudinary secure_url (dummy Unsplash URL untuk sementara)
+  tags         String[] @default([]) // best_seller, spicy, vegetarian, new
+  status       String   @default("available") // available | out_of_stock
+  sortOrder    Int      @default(0) @map("sort_order")
+  createdAt    DateTime @default(now()) @map("created_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
+  category   MenuCategory @relation(fields: [categoryId], references: [id])
+  orderItems OrderItem[]
+
+  @@map("menu_items")
+}
+
+model Order {
+  id            String   @id @default(uuid())
+  restaurantId  String   @map("restaurant_id")
+  bookingId     String?  @map("booking_id") // nullable untuk walk-in
+  customerPhone String?  @map("customer_phone")
+  customerName  String?  @map("customer_name")
+  tableId       String   @map("table_id")
+  subtotal      Int      @default(0)
+  tax           Int      @default(0)
+  serviceCharge Int      @default(0) @map("service_charge")
+  total         Int      @default(0)
+  status        String   @default("active") // active | completed | cancelled
+  paymentStatus String   @default("unpaid") @map("payment_status") // unpaid | paid
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
+  booking    Booking?    @relation(fields: [bookingId], references: [id])
+  table      Table       @relation(fields: [tableId], references: [id])
+  items      OrderItem[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String   @map("order_id")
+  menuItemId  String   @map("menu_item_id")
+  qty         Int      @default(1)
+  priceAtTime Int      @map("price_at_time") // snapshot harga saat order
+  notes       String?  // "kurang pedas", "no msg"
+  status      String   @default("pending") // pending | cooking | ready | served
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  order    Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@index([status])
+  @@map("order_items")
+}
+
+// ── better-auth managed models (nama disesuaikan default adapter better-auth) ──
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false) @map("email_verified")
+  image         String?
+  role          String // owner | cashier | kitchen — custom additional field
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  sessions Session[]
+  accounts Account[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id @default(uuid())
+  userId                String    @map("user_id")
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+// ── RAG vector store ──
+
+model VectorStore {
+  id        String                     @id @default(uuid())
+  content   String
+  embedding Unsupported("vector(768)") // Gemini embedding dimension
+  metadata  Json // { type: 'menu'|'meja'|'rule'|'faq'|'customer', source_id, category }
+  createdAt DateTime                   @default(now()) @map("created_at")
+
+  @@map("vector_store")
+}
