@@ -1,7 +1,7 @@
 # Context — Referensi Teknis Backend Megatha Kitchen
 
-**Terakhir diupdate:** 8 Juli 2026
-**Tujuan file ini:** referensi teknis & gotcha yang perlu diingat kalau lanjut ngoding backend ini, plus checklist deploy Vercel. Detail requirement/kontrak API lengkap ada di `backend.md`.
+**Terakhir diupdate:** 16 Juli 2026
+**Tujuan file ini:** referensi teknis & gotcha yang perlu diingat kalau lanjut ngoding backend ini, plus catatan deploy Vercel (§4). Detail requirement/kontrak API lengkap ada di `backend.md`.
 
 **Status:** Semua FR di `backend.md` sudah diimplementasi **kecuali AI Concierge** (`/ai/chat`, seluruh §10 `backend.md`) — `src/modules/ai/*` masih placeholder kosong.
 
@@ -117,94 +117,46 @@ Testing manual pakai Postman collection di `backend/postman/` (`megatha-kitchen-
 
 ---
 
-## 4. Checklist sebelum deploy ke Vercel (belum dikerjakan, sengaja ditunda)
+## 4. Deploy Vercel — status & gotcha nyata (sudah live, backend ada di `restoran-backend` repo terpisah)
 
-1. **`src/index.ts` masih pola `app.listen()`** — gak jalan di Vercel Functions apa adanya. Perlu entrypoint baru (mis. `api/index.ts`) yang export `app` langsung, plus `vercel.json` rewrite semua path ke situ. `src/index.ts` tetap dipertahankan buat dev lokal.
-2. **Connection string Neon buat production harus yang `-pooler`** (bukan direct) — serverless function bisa spawn banyak instance paralel, tanpa pooling gampang kehabisan slot koneksi Postgres.
-3. **Daftarkan `POST /internal/cron/no-show` ke `vercel.json` `crons`** (`*/15 * * * *`) + set `CRON_SECRET` di env var Vercel.
-4. **`app.set('trust proxy', ...)`** buat `generalRateLimiter`/`bookingRateLimiter` baca `req.ip` yang benar di belakang proxy Vercel. (`adminRateLimiter` gak kena masalah ini — key per `user.id`, bukan IP.)
-5. **Ganti store `express-rate-limit` ke shared store** (Redis/Upstash) supaya limit konsisten lintas Vercel Function instance — in-memory store cuma valid untuk 1 proses long-running (dev lokal).
-6. Sengaja ditunda sampai beneran mau deploy, karena gak bisa divalidasi penuh tanpa deploy asli, dan gak ngeblok dev lokal.
+**Status: sudah deploy & jalan di production** (`restoran-backend-rosy.vercel.app`). Bagian ini isinya bukan lagi rencana, tapi **catatan dari masalah nyata yang kejadian & fix-nya** — baca ini sebelum ngoprek konfigurasi deploy lagi.
 
+### Yang berhasil diimplementasi
+- `api/index.ts` (root, bukan di `src/`) — entrypoint serverless, `export default app` (import dari `../src/app`), **tanpa** manggil `startNoShowCron()` (node-cron gak jalan di serverless, proses di-freeze antar invocation).
+- `vercel.json`:
+  ```json
+  {
+    "functions": { "api/index.ts": { "maxDuration": 10 } },
+    "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
+    "crons": [{ "path": "/internal/cron/no-show", "schedule": "0 17 * * *" }]
+  }
+  ```
+- `package.json` — `"postinstall": "prisma generate"` (wajib, `node_modules` di-gitignore jadi Prisma Client harus di-generate ulang tiap build Vercel).
+- `src/app.ts` — `app.set('trust proxy', 1)` tepat setelah `express()` (di belakang proxy Vercel, tanpa ini `req.ip` yang dibaca `ipKeyGenerator` di rate limiter salah).
+- `DATABASE_URL` production pakai endpoint Neon **`-pooler`** (bukan direct) — serverless spawn banyak instance paralel.
+- Cron **1x/hari** (`0 17 * * *` UTC = 00:00 WIB), bukan tiap 15 menit — Vercel Hobby plan cuma izinin cron 1x/hari.
 
-Context
+### 🔴 Bug besar #1 — `ERR_REQUIRE_ESM`: better-auth ESM-only vs project CommonJS
+Catatan lama di §2 bilang "aman karena Node 22 native `require(esm)`" — **itu cuma bener di lokal**. Loader serverless Vercel **TIDAK** support `require()` ke modul ESM sama sekali, jadi semua route (termasuk `/health`) 500 crash total pas cold start begitu deploy.
 
- Backend sekarang cuma jalan lewat app.listen() (src/index.ts) — gak jalan apa adanya di Vercel Functions (serverless, gak ada proses
- long-running). Ini pertama kalinya user hosting backend, jadi plan ini dipisah jelas: kode yang saya ubah vs langkah manual di dashboard
- Vercel/GitHub yang cuma bisa dikerjain user sendiri.
+**Fix:** ubah 3 tempat yang import `better-auth` sebagai *value* (`src/lib/auth.ts`, `src/app.ts`, `src/middlewares/require-auth.ts`) jadi **dynamic `import()`** di dalam fungsi, di-memoize (`let authPromise`/`let authHandlerPromise`, cuma dibangun sekali per warm function). `import type` (buat derive tipe, mis. `Auth['$Infer']['Session']` di `express.d.ts`) aman, itu di-erase saat compile, gak ikut crash.
+**Verifikasi penting:** cek hasil compile (`dist/*.js`) beneran `await import(...)` native, bukan diam-diam di-transpile `tsc` jadi `require(...)` — itu bakal muncul lagi error yang sama.
 
- Checklist awal udah ada di backend/context.md §4 (ditulis pas awal proyek, sengaja ditunda sampai beneran mau deploy — sekarang saatnya). Saya
- cross-check lagi ke kode aktual (app.ts, rate-limit.ts, tsconfig.json, package.json) dan nemu 1 hal yang gak ada di catatan lama tapi
- krusial: prisma generate gak pernah jalan otomatis pas install — node_modules di-gitignore, jadi tiap fresh install (termasuk build server
- Vercel) butuh regenerasi Prisma Client, kalau kelewat aplikasi bakal crash pas start.
+### 🔴 Bug besar #2 — Vercel auto-detect `src/app.ts` jadi function terpisah
+Root path `/` selalu 500 dengan error `Invalid export found in module "src/app.js". The default export must be a function or server.` — Vercel secara zero-config **auto-detect** `src/app.ts` (nama file umum kayak `app.ts`/`server.ts`) sebagai serverless function sendiri, terpisah dari `api/index.ts` yang kita buat sengaja. Karena `src/app.ts` cuma named export (`export const app`), bukan default export, dia crash.
 
- Kabar baik: DATABASE_URL di .env lokal udah pakai endpoint -pooler Neon — jadi poin "connection string harus pooler" di checklist lama udah
- otomatis kelar, tinggal reuse value yang sama di env var Vercel.
+**Fix:** `vercel.json` key `"functions"` scoped eksplisit cuma ke `api/index.ts` (lihat contoh di atas), biar Vercel gak ngoprek file lain. **Catatan:** `"functions": {"api/index.ts": {}}` (objek kosong) **ditolak** Vercel (`Function must contain at least one property`) — minimal isi 1 property valid, mis. `maxDuration`.
 
- Keputusan user: push backend ke GitHub repo baru dulu (bukan Vercel CLI langsung) — biar auto-redeploy tiap push. Rate limiter Redis/Upstash
- di-skip buat deploy pertama (in-memory diterima, dicatat sebagai keterbatasan, bukan blocker).
+### 🔴 Bug besar #3 — trailing slash di env var bikin better-auth nolak origin valid
+`BETTER_AUTH_URL`/`FRONTEND_ORIGIN` yang ke-isi **dengan** trailing slash (`https://xxx.vercel.app/`, umum kepencet copy-paste dari address bar) bikin login gagal total (`403 INVALID_ORIGIN`) — **meski origin-nya keliatan "sama"**. better-auth cek `trustedOrigins` pakai **exact string match** (`pattern === getOrigin(originHeader)`), dan browser **selalu** kirim header `Origin` tanpa trailing slash — jadi `https://xxx.vercel.app/` (di config) vs `https://xxx.vercel.app` (dari browser) **gak pernah match**.
+**Selalu double-check env var URL gak ada `/` nyangkut di akhir.**
 
- Part A — Perubahan kode (saya kerjain)
+### ⚠️ Cross-domain cookie (relevan kalau backend/frontend ganti domain)
+Cookie session better-auth (`__Secure-better-auth.session_token`) **gak punya `Domain` attribute eksplisit** — jadi cookie itu ke-scope ketat ke origin backend sendiri. Kalau frontend & backend beda domain (kasus sekarang: `*.vercel.app` masing-masing dianggap "site" terpisah oleh browser), **frontend WAJIB proxy semua panggilan API lewat origin-nya sendiri** (lihat `frontend/DEV_NOTES.md`) supaya cookie jadi first-party — kalau enggak, API login sukses tapi cookie gak pernah ke-attach ke request berikutnya (kelihatan kayak "gagal login" padahal API-nya sukses).
 
- 1. backend/package.json — tambah "postinstall": "prisma generate" di scripts. Wajib, bukan opsional — tanpa ini Prisma Client gak ke-generate
- ulang di server Vercel dan aplikasi bakal crash saat start.
- 2. backend/src/app.ts:
-   - Tambah app.set('trust proxy', 1) tepat setelah export const app = express() — Vercel selalu di belakang proxy, tanpa ini req.ip yang
- dibaca generalRateLimiter/bookingRateLimiter/adminRateLimiter (ipKeyGenerator(req.ip)) bakal salah/gak akurat.
-   - /internal/cron/no-show: ganti app.post(...) → app.all(...). Alasan konkret: Vercel Cron selalu ngirim request pakai method GET ke path
- yang didaftarkan (bukan POST) — endpoint yang cuma nerima POST bakal 404 pas dipanggil cron beneran. Auth tetap sama (Authorization: Bearer
- <CRON_SECRET>, dibaca dari header, gak terikat method), jadi ganti ke app.all aman dan sekalian bikin manual testing via POST (Postman) tetap
- jalan.
- 3. backend/api/index.ts (baru, root — bukan di dalam src/, ini konvensi Vercel) — entrypoint serverless: import { app } from '../src/app';
- export default app. src/index.ts (app.listen) tetap dipertahankan buat dev lokal, gak dihapus.
- 4. backend/vercel.json (baru) — rewrites semua path ke /api/index (biar Express yang urus routing internal, bukan Vercel filesystem routing) +
- crons daftarin /internal/cron/no-show jadwal */15 * * * * (match node-cron interval yang udah ada di dev).
- 5. backend/tsconfig.json — tambah "api" ke include (di samping "src" yang udah ada), biar npx tsc --noEmit lokal ikut ngecek file baru ini
- juga. Catatan: ini gak bentrok sama rootDir: "src" yang udah ada — Vercel gak pernah manggil npm run build/tsc -p tsconfig.json buat compile
- api/index.ts, dia punya compiler sendiri (esbuild) yang jalan independen pas deploy. Jadi dist//outDir tetap cuma relevan buat dev lokal, gak
- kepake sama sekali di Vercel.
- 6. backend/.gitignore — tambah baris .vercel (folder config lokal yang dibuat Vercel CLI kalau nanti dipakai, standar di-gitignore).
- 7. backend/.env.example — tambah 1 baris comment di atas DATABASE_URL nyebutin "production wajib pakai endpoint -pooler Neon" — dokumentasi
- doang, biar gak lupa kalau nanti reset/ganti database.
+### ⚠️ Belum diverifikasi / known gap
+- **`/internal/cron/no-show` masih `app.post` doang** — perlu dicek ulang apakah Vercel Cron Jobs kirim request pakai `GET` atau `POST` (kalau `GET`, endpoint ini bakal 404 pas di-invoke beneran karena Express `app.post` cuma match method POST). Cek tab **Cron Jobs** di Vercel dashboard setelah siklus pertama jalan (00:00 WIB), atau ganti ke `app.all` kalau ternyata `GET`.
+- **Rate limiter (`express-rate-limit`) masih in-memory** — belum pindah ke shared store (Redis/Upstash). Konsekuensi: limit gak konsisten lintas Vercel Function instance (tiap instance punya counter sendiri). Diterima buat sekarang (traffic rendah), bukan blocker.
 
- Part B — Langkah manual (kamu yang jalanin, saya bisa bantu command persisnya)
-
- 1. Push backend ke GitHub repo baru. gh CLI gak tersedia di environment ini, jadi kamu perlu bikin repo kosong dulu manual di github.com (New
- Repository, jangan centang "add README"). Setelah itu kasih saya URL repo-nya (mis. https://github.com/username/nama-repo.git), saya bantu
- jalanin git init + commit awal + git remote add + git push dari folder backend (tetap saya minta konfirmasi kamu sebelum push, itu aksi
- visible ke luar).
- 2. Buat Vercel project dari dashboard (vercel.com) → Import Git Repository → pilih repo backend yang baru dibikin.
- 3. Set environment variables di Vercel project settings (Production):
-   - DATABASE_URL — reuse persis value dari .env lokal kamu (udah pooler ✓).
-   - BETTER_AUTH_SECRET, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET — reuse dari .env lokal.
-   - NODE_ENV = production.
-   - FRONTEND_ORIGIN = URL frontend production kamu (kalau frontend belum di-deploy juga, isi placeholder dulu, update belakangan).
-   - CRON_SECRET = bikin string random baru (bukan reuse yang lain) — ini yang Vercel otomatis kirim sebagai Authorization: Bearer <value> pas
- manggil cron endpoint.
-   - BETTER_AUTH_URL = isi placeholder dulu (mis. https://placeholder.vercel.app) — nilai aslinya baru ketahuan SETELAH deploy pertama (Vercel
- kasih domain *.vercel.app otomatis), balik ke sini update abis itu.
- 4. Deploy pertama kali (otomatis begitu di-import, atau trigger manual dari dashboard).
- 5. Setelah dapet domain (https://nama-project-xxx.vercel.app) — balik ke env vars, update BETTER_AUTH_URL ke domain asli itu, lalu redeploy
-     │ (Vercel kasih domain *.vercel.app otomatis), balik ke sini update abis itu.                                                             │
-     │ 4. Deploy pertama kali (otomatis begitu di-import, atau trigger manual dari dashboard).                                                 │
-     │ 5. Setelah dapet domain (https://nama-project-xxx.vercel.app) — balik ke env vars, update BETTER_AUTH_URL ke domain asli itu, lalu      │
-     │ redeploy (env var baru butuh redeploy manual buat kepake).                                                                              │
-     │ 6. Update frontend: NEXT_PUBLIC_API_URL (env var frontend, baik di Vercel project frontend atau .env.local kalau masih dev) diarahin ke │
-     │ domain backend baru itu.                                                                                                                │
-     │ 7. Cek tab "Cron Jobs" di Vercel project settings — pastiin /internal/cron/no-show muncul terdaftar jadwal */15 * * * * setelah deploy. │
-     │                                                                                                                                         │
-     │ Sengaja di-skip (keputusan user, bukan lupa)                                                                                            │
-     │                                                                                                                                         │
-     │ - Rate limiter shared store (Redis/Upstash) — tetap in-memory. Konsekuensi: limit                                                       │
-     │ generalRateLimiter/bookingRateLimiter/adminRateLimiter gak konsisten kalau Vercel spawn banyak instance function paralel (tiap instance │
-     │ punya counter sendiri-sendiri) — bukan fatal buat awal-awal, tapi dicatat sebagai kerjaan lanjutan kalau traffic naik.                  │
-     │                                                                                                                                         │
-     │ Verifikasi                                                                                                                              │
-     │                                                                                                                                         │
-     │ - Lokal dulu (sebelum push): npm run dev masih jalan normal (gak somehow ke-break sama perubahan app.set/route method), npx tsc         │
-     │ --noEmit bersih termasuk api/index.ts baru.                                                                                             │
-     │ - Setelah deploy: curl https://<domain>/health → {"success":true,"data":{"status":"ok"}}. Test login staff (POST                        │
-     │ /api/auth/sign-in/email) beneran dari domain production. Test 1 alur booking end-to-end (POST /bookings publik) ke database production  │
-     │ yang sama. Cek log Vercel function buat mastiin Prisma Client jalan (gak ada error "client not generated").                             │
-     │ - Cron: tunggu siklus 15 menit pertama, cek Vercel Cron Jobs log beneran ke-invoke, atau trigger manual curl -X POST                    │
-     │ https://<domain>/internal/cron/no-show -H "Authorization: Bearer <CRON_SECRET>".      
+### Env var yang WAJIB di Vercel (project backend)
+`DATABASE_URL` (pooler), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `FRONTEND_ORIGIN`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CRON_SECRET` — semua URL **tanpa trailing slash**. `NODE_ENV`/`PORT` gak perlu (Vercel/serverless handle otomatis), `DIRECT_URL` cuma dipakai migrasi manual dari lokal (bukan runtime).

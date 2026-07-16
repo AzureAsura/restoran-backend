@@ -26,6 +26,14 @@ async function buildAuth() {
         isActive: { type: 'boolean', required: false, input: false, defaultValue: true },
       },
     },
+    session: {
+      // Admin dashboard was hitting Neon 3x per navigation (proxy middleware +
+      // layout prefetch + requireAuth all call getSession independently, none
+      // cached). This signs a session snapshot into a short-lived cookie so
+      // getSession verifies locally instead of round-tripping the DB every
+      // time — DB is only re-hit once maxAge expires.
+      cookieCache: { enabled: true, maxAge: 5 * 60 },
+    },
     advanced: {
       // Production: FE & BE are on separate domains (see backend.md NFR-SEC-07),
       // so the session cookie needs SameSite=None + Secure to be sent
