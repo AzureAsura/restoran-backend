@@ -1,6 +1,6 @@
-import type { auth } from '../lib/auth'
+import type { Auth } from '../lib/auth'
 
-type AuthSession = typeof auth.$Infer.Session
+type AuthSession = Auth['$Infer']['Session']
 
 declare global {
   namespace Express {

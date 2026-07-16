@@ -2,10 +2,9 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
-import { toNodeHandler } from 'better-auth/node'
 
 import { env } from './config/env'
-import { auth } from './lib/auth'
+import { getAuth } from './lib/auth'
 import { errorHandler } from './middlewares/error-handler'
 import { requireAuth } from './middlewares/require-auth'
 import { requireRole } from './middlewares/require-role'
@@ -34,7 +33,26 @@ app.use(morgan(env.nodeEnv === 'development' ? 'dev' : 'combined'))
 // body itself. `app.all` (not `app.use`) so req.url keeps the `/api/auth`
 // prefix that better-auth's basePath expects; Express 5 requires the named
 // wildcard `*splat` instead of a bare `*`.
-app.all('/api/auth/*splat', generalRateLimiter, toNodeHandler(auth))
+//
+// better-auth/node is ESM-only, so both it and the auth instance are loaded
+// lazily via dynamic import() on first request and memoized — see
+// src/lib/auth.ts for why.
+let authHandlerPromise: ReturnType<typeof buildAuthHandler> | undefined
+
+async function buildAuthHandler() {
+  const { toNodeHandler } = await import('better-auth/node')
+  return toNodeHandler(await getAuth())
+}
+
+app.all('/api/auth/*splat', generalRateLimiter, async (req, res, next) => {
+  try {
+    if (!authHandlerPromise) authHandlerPromise = buildAuthHandler()
+    const handler = await authHandlerPromise
+    handler(req, res)
+  } catch (err) {
+    next(err)
+  }
+})
 
 app.use(express.json())
 
