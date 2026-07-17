@@ -76,12 +76,12 @@ export async function deleteCategory(id: string) {
     throw new AppError(404, 'CATEGORY_NOT_FOUND', 'Menu category not found.')
   }
 
-  const menuItemCount = await prisma.menuItem.count({ where: { categoryId: id, deletedAt: null } })
+  const menuItemCount = await prisma.menuItem.count({ where: { categoryId: id } })
   if (menuItemCount > 0) {
     throw new AppError(
       409,
       'CATEGORY_IN_USE',
-      'This category cannot be deleted because it still has menu items. Deactivate it instead, or move/delete its menu items first.',
+      'This category cannot be deleted because it has menu items (including deleted ones, which are kept for order history). Deactivate it instead.',
     )
   }
 

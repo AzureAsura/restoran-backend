@@ -10,7 +10,6 @@ export type GetMenuQuery = z.infer<typeof getMenuQuerySchema>
 
 export const MENU_ITEM_STATUSES = ['available', 'out_of_stock'] as const
 
-// Multipart form fields arrive as strings, so numeric/array fields are coerced/transformed.
 const tagsField = z
   .union([z.array(z.string()), z.string()])
   .transform((value) =>
