@@ -59,6 +59,7 @@ export async function getMenuGroupedByCategory(query: GetMenuQuery) {
         id: category.id,
         restaurant_id: category.restaurantId,
         name: category.name,
+        image_url: category.imageUrl,
         sort_order: category.sortOrder,
         is_active: category.isActive,
       },

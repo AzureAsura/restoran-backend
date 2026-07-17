@@ -7,9 +7,9 @@ cloudinary.config({
   api_secret: env.cloudinaryApiSecret,
 })
 
-export function uploadMenuImage(buffer: Buffer): Promise<string> {
+function uploadImage(buffer: Buffer, folder: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream({ folder: 'megatha/menu' }, (error, result) => {
+    const stream = cloudinary.uploader.upload_stream({ folder }, (error, result) => {
       if (error || !result) {
         return reject(error ?? new Error('Cloudinary upload failed.'))
       }
@@ -19,10 +19,18 @@ export function uploadMenuImage(buffer: Buffer): Promise<string> {
   })
 }
 
+export function uploadMenuImage(buffer: Buffer): Promise<string> {
+  return uploadImage(buffer, 'megatha/menu')
+}
+
+export function uploadCategoryImage(buffer: Buffer): Promise<string> {
+  return uploadImage(buffer, 'megatha/menu-categories')
+}
+
 // Derives the public_id Cloudinary needs for deletion from the secure_url we
 // stored (schema only keeps the URL, not public_id) — safe because every
-// upload goes through uploadMenuImage above with no transformations, so the
-// URL shape is always .../upload/v<version>/megatha/menu/<id>.<ext>.
+// upload goes through uploadImage above with no transformations, so the URL
+// shape is always .../upload/v<version>/<folder>/<id>.<ext>.
 function publicIdFromUrl(url: string): string | null {
   try {
     const { hostname, pathname } = new URL(url)

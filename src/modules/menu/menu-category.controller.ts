@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express'
+import { uploadCategoryImage } from '../../lib/cloudinary'
 import { categoryIdParamSchema, createMenuCategorySchema, updateMenuCategorySchema } from './menu-category.schema'
 import { createCategory, deleteCategory, listCategories, updateCategory } from './menu-category.service'
 
@@ -17,7 +18,8 @@ export async function postCategory(req: Request, res: Response) {
     })
   }
 
-  const data = await createCategory(parsed.data)
+  const imageUrl = req.file ? await uploadCategoryImage(req.file.buffer) : null
+  const data = await createCategory(parsed.data, imageUrl)
   res.status(201).json({ success: true, data })
 }
 
@@ -38,7 +40,15 @@ export async function patchCategory(req: Request, res: Response) {
     })
   }
 
-  const data = await updateCategory(paramsParsed.data.id, bodyParsed.data)
+  if (Object.keys(bodyParsed.data).length === 0 && !req.file) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'At least one field or an image must be provided.' },
+    })
+  }
+
+  const imageUrl = req.file ? await uploadCategoryImage(req.file.buffer) : null
+  const data = await updateCategory(paramsParsed.data.id, bodyParsed.data, imageUrl)
   res.json({ success: true, data })
 }
 

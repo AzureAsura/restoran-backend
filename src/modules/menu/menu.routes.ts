@@ -30,6 +30,6 @@ adminMenuRouter.delete('/:id', requireRole('owner'), deleteMenuItemHandler)
 export const adminMenuCategoryRouter = Router()
 
 adminMenuCategoryRouter.get('/', requireRole('owner', 'cashier'), getCategories)
-adminMenuCategoryRouter.post('/', requireRole('owner'), postCategory)
-adminMenuCategoryRouter.patch('/:id', requireRole('owner'), patchCategory)
+adminMenuCategoryRouter.post('/', requireRole('owner'), upload.single('image'), postCategory)
+adminMenuCategoryRouter.patch('/:id', requireRole('owner'), upload.single('image'), patchCategory)
 adminMenuCategoryRouter.delete('/:id', requireRole('owner'), deleteCategoryHandler)
