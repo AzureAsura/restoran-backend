@@ -15,3 +15,12 @@ export const getMenuPerformanceQuerySchema = z.object({
 })
 
 export type GetMenuPerformanceQuery = z.infer<typeof getMenuPerformanceQuerySchema>
+
+export const REVENUE_PERIODS = ['week', 'month', 'year'] as const
+
+export const getRevenueQuerySchema = z.object({
+  period: z.enum(REVENUE_PERIODS, { message: 'period must be one of: week, month, year.' }).default('month'),
+  date: z.string().regex(dateRegex, 'Date must be in YYYY-MM-DD format.').optional(),
+})
+
+export type GetRevenueQuery = z.infer<typeof getRevenueQuerySchema>

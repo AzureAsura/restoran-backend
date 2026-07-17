@@ -61,11 +61,20 @@ export async function updateCategory(id: string, input: UpdateMenuCategoryInput)
   return toCategoryDTO(category)
 }
 
-export async function softDeleteCategory(id: string) {
+export async function deleteCategory(id: string) {
   const existing = await prisma.menuCategory.findUnique({ where: { id } })
   if (!existing) {
     throw new AppError(404, 'CATEGORY_NOT_FOUND', 'Menu category not found.')
   }
 
-  await prisma.menuCategory.update({ where: { id }, data: { isActive: false } })
+  const menuItemCount = await prisma.menuItem.count({ where: { categoryId: id } })
+  if (menuItemCount > 0) {
+    throw new AppError(
+      409,
+      'CATEGORY_IN_USE',
+      'This category cannot be deleted because it still has menu items. Deactivate it instead, or move/delete its menu items first.',
+    )
+  }
+
+  await prisma.menuCategory.delete({ where: { id } })
 }

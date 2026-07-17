@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { AppError } from '../../utils/app-error'
@@ -20,6 +21,8 @@ function toOrderDTO(order: OrderWithItems) {
     total: order.total,
     status: order.status,
     payment_status: order.paymentStatus,
+    payment_group_id: order.paymentGroupId,
+    paid_at: order.paidAt,
     items: order.items.map((item) => ({
       id: item.id,
       menu_item_id: item.menuItemId,
@@ -52,6 +55,13 @@ export async function createOrder(input: CreateOrderInput) {
   const table = await prisma.table.findUnique({ where: { id: input.table_id } })
   if (!table) {
     throw new AppError(404, 'TABLE_NOT_FOUND', 'Table not found.')
+  }
+
+  if (input.booking_id) {
+    const booking = await prisma.booking.findUnique({ where: { id: input.booking_id } })
+    if (!booking) {
+      throw new AppError(404, 'BOOKING_NOT_FOUND', 'Booking not found.')
+    }
   }
 
   if (input.customer_phone) {
@@ -88,6 +98,7 @@ export async function createOrder(input: CreateOrderInput) {
       data: {
         restaurantId: restaurant.id,
         tableId: table.id,
+        bookingId: input.booking_id,
         customerPhone: input.customer_phone,
         customerName: input.customer_name,
         subtotal,
@@ -126,7 +137,18 @@ export async function listOrders(query: GetOrdersQuery) {
       : {}),
     ...(query.table_id ? { tableId: query.table_id } : {}),
     ...(query.status ? { status: query.status } : {}),
+    ...(query.payment_status ? { paymentStatus: query.payment_status } : {}),
     ...(query.customer_phone ? { customerPhone: { contains: query.customer_phone, mode: 'insensitive' } } : {}),
+    ...(query.paid_from || query.paid_to
+      ? {
+          paidAt: {
+            ...(query.paid_from ? { gte: startOfDayJakartaUtc(query.paid_from) } : {}),
+            ...(query.paid_to
+              ? { lt: new Date(startOfDayJakartaUtc(query.paid_to).getTime() + 24 * 60 * 60 * 1000) }
+              : {}),
+          },
+        }
+      : {}),
   }
 
   const [orders, total] = await Promise.all([
@@ -161,19 +183,34 @@ function derivePercent(amount: number, subtotal: number): number {
 }
 
 export async function getOrderBill(id: string) {
-  const order = await prisma.order.findUnique({
-    where: { id },
-    include: { items: { include: { menuItem: true } }, table: true },
-  })
+  const [order, restaurant] = await Promise.all([
+    prisma.order.findUnique({
+      where: { id },
+      include: { items: { include: { menuItem: true } }, table: true },
+    }),
+    prisma.restaurant.findFirst(),
+  ])
 
   if (!order) {
     throw new AppError(404, 'ORDER_NOT_FOUND', 'Order not found.')
   }
+  if (!restaurant) {
+    throw new AppError(500, 'RESTAURANT_NOT_CONFIGURED', 'Restaurant data has not been configured.')
+  }
 
   return {
     order_id: order.id,
+    // Struk header — this DTO doubles as the printable receipt (Receipt.tsx),
+    // not just an on-screen bill breakdown, so it carries restaurant identity.
+    restaurant: {
+      name: restaurant.name,
+      address: restaurant.address,
+      phone: restaurant.phone,
+      email: restaurant.email,
+    },
     table: { id: order.table.id, name: order.table.name, area: order.table.area },
     payment_status: order.paymentStatus,
+    paid_at: order.paidAt,
     items: order.items.map((item) => {
       const lineTotal = item.priceAtTime * item.qty
       return {
@@ -211,11 +248,49 @@ export async function updateOrderPaymentStatus(id: string, input: UpdateOrderPay
 
   const order = await prisma.order.update({
     where: { id },
-    data: { paymentStatus: input.payment_status },
+    data: {
+      paymentStatus: input.payment_status,
+      // Revert to unpaid means this order isn't part of any paid transaction
+      // anymore, so both markers are cleared. Paying an already-paid order
+      // again (idempotent) keeps its original paidAt/group instead of
+      // overwriting them.
+      paidAt: input.payment_status === 'paid' ? (existing.paidAt ?? new Date()) : null,
+      paymentGroupId: input.payment_status === 'paid' ? existing.paymentGroupId : null,
+    },
     include: { items: { include: { menuItem: true } }, table: true },
   })
 
   return toOrderDTO(order)
+}
+
+// Pays multiple orders as a single transaction/receipt (split-bill: cashier
+// selects which active orders on a table to combine and pay together). All
+// selected orders share one paymentGroupId and the exact same paidAt, so
+// revenue reporting can count the group as one transaction (see
+// analytics.service.ts) and a group can never straddle two report buckets.
+export async function payOrdersBatch(orderIds: string[]) {
+  const existingOrders = await prisma.order.findMany({ where: { id: { in: orderIds } } })
+  if (existingOrders.length !== orderIds.length) {
+    throw new AppError(404, 'ORDER_NOT_FOUND', 'One or more orders were not found.')
+  }
+
+  const groupId = randomUUID()
+  const paidAt = new Date()
+
+  const orders = await prisma.$transaction(async (tx) => {
+    const updated: OrderWithItems[] = []
+    for (const id of orderIds) {
+      const order = await tx.order.update({
+        where: { id },
+        data: { paymentStatus: 'paid', paidAt, paymentGroupId: groupId },
+        include: { items: { include: { menuItem: true } }, table: true },
+      })
+      updated.push(order)
+    }
+    return updated
+  })
+
+  return orders.map(toOrderDTO)
 }
 
 // Closes out a table: completes every active order there and frees the

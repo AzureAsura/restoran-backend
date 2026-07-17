@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma'
+import { deleteMenuImage } from '../../lib/cloudinary'
 import { AppError } from '../../utils/app-error'
 import type { CreateMenuItemInput, GetMenuQuery, UpdateMenuItemInput } from './menu.schema'
 
@@ -68,7 +69,7 @@ export async function getMenuGroupedByCategory(query: GetMenuQuery) {
 export async function listAdminMenu() {
   const items = await prisma.menuItem.findMany({
     where: { deletedAt: null },
-    orderBy: { sortOrder: 'asc' },
+    orderBy: [{ createdAt: 'desc' }, { sortOrder: 'asc' }],
     include: { category: { select: { id: true, name: true } } },
   })
 
@@ -133,6 +134,10 @@ export async function updateMenuItem(id: string, input: UpdateMenuItemInput, ima
     include: { category: { select: { id: true, name: true } } },
   })
 
+  if (imageUrl !== null && existing.imageUrl && existing.imageUrl !== imageUrl) {
+    await deleteMenuImage(existing.imageUrl)
+  }
+
   return toMenuItemDTO(item)
 }
 
@@ -143,4 +148,8 @@ export async function softDeleteMenuItem(id: string) {
   }
 
   await prisma.menuItem.update({ where: { id }, data: { deletedAt: new Date() } })
+
+  if (existing.imageUrl) {
+    await deleteMenuImage(existing.imageUrl)
+  }
 }

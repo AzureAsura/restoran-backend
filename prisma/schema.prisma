@@ -33,8 +33,8 @@ model Restaurant {
 model Table {
   id           String   @id @default(uuid())
   restaurantId String   @map("restaurant_id")
-  name         String   // "Meja 1"
-  area         String   // 'indoor' | 'outdoor'
+  name         String // "Meja 1"
+  area         String // 'indoor' | 'outdoor'
   capacity     Int
   status       String   @default("available") // available | reserved | occupied | maintenance
   sortOrder    Int      @default(0) @map("sort_order")
@@ -111,17 +111,17 @@ model MenuCategory {
 }
 
 model MenuItem {
-  id           String   @id @default(uuid())
-  restaurantId String   @map("restaurant_id")
-  categoryId   String   @map("category_id")
+  id           String    @id @default(uuid())
+  restaurantId String    @map("restaurant_id")
+  categoryId   String    @map("category_id")
   name         String
   price        Int
   description  String?
-  imageUrl     String?  @map("image_url") // Cloudinary secure_url (dummy Unsplash URL untuk sementara)
-  tags         String[] @default([]) // best_seller, spicy, vegetarian, new
-  status       String   @default("available") // available | out_of_stock
-  sortOrder    Int      @default(0) @map("sort_order")
-  createdAt    DateTime @default(now()) @map("created_at")
+  imageUrl     String?   @map("image_url") // Cloudinary secure_url (dummy Unsplash URL untuk sementara)
+  tags         String[]  @default([]) // best_seller, spicy, vegetarian, new
+  status       String    @default("available") // available | out_of_stock
+  sortOrder    Int       @default(0) @map("sort_order")
+  createdAt    DateTime  @default(now()) @map("created_at")
   deletedAt    DateTime? @map("deleted_at")
 
   restaurant Restaurant   @relation(fields: [restaurantId], references: [id])
@@ -132,20 +132,22 @@ model MenuItem {
 }
 
 model Order {
-  id            String   @id @default(uuid())
-  restaurantId  String   @map("restaurant_id")
-  bookingId     String?  @map("booking_id") // nullable untuk walk-in
-  customerPhone String?  @map("customer_phone")
-  customerName  String?  @map("customer_name")
-  tableId       String   @map("table_id")
-  subtotal      Int      @default(0)
-  tax           Int      @default(0)
-  serviceCharge Int      @default(0) @map("service_charge")
-  total         Int      @default(0)
-  status        String   @default("active") // active | completed | cancelled
-  paymentStatus String   @default("unpaid") @map("payment_status") // unpaid | paid
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id             String    @id @default(uuid())
+  restaurantId   String    @map("restaurant_id")
+  bookingId      String?   @map("booking_id") // nullable untuk walk-in
+  customerPhone  String?   @map("customer_phone")
+  customerName   String?   @map("customer_name")
+  tableId        String    @map("table_id")
+  subtotal       Int       @default(0)
+  tax            Int       @default(0)
+  serviceCharge  Int       @default(0) @map("service_charge")
+  total          Int       @default(0)
+  status         String    @default("active") // active | completed | cancelled
+  paymentStatus  String    @default("unpaid") @map("payment_status") // unpaid | paid
+  paidAt         DateTime? @map("paid_at") // waktu payment_status -> paid; basis agregasi revenue
+  paymentGroupId String?   @map("payment_group_id") // sama utk order2 yg dibayar+dicetak bareng (pay-batch); null = dibayar sendiri
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   restaurant Restaurant  @relation(fields: [restaurantId], references: [id])
   booking    Booking?    @relation(fields: [bookingId], references: [id])
@@ -161,7 +163,7 @@ model OrderItem {
   menuItemId  String   @map("menu_item_id")
   qty         Int      @default(1)
   priceAtTime Int      @map("price_at_time") // snapshot harga saat order
-  notes       String?  // "kurang pedas", "no msg"
+  notes       String? // "kurang pedas", "no msg"
   status      String   @default("pending") // pending | cooking | ready | served
   createdAt   DateTime @default(now()) @map("created_at")
 

@@ -129,15 +129,19 @@ Backend melayani dua kategori client, keduanya lewat frontend Next.js:
 ### 4.3 POS / Cashier (Admin)
 
 #### FR-POS-01: Order Input
-- **Description**: `POST /admin/orders` — pilih meja, menu items + qty + notes. Backend hitung subtotal, tax, service charge, total. Order baru otomatis muncul di `GET /admin/kitchen-queue` pada poll berikutnya (tidak ada event push terpisah).
+- **Description**: `POST /admin/orders` — pilih meja, menu items + qty + notes. Backend hitung subtotal, tax, service charge, total. Order baru otomatis muncul di `GET /admin/kitchen-queue` pada poll berikutnya (tidak ada event push terpisah). Opsional `booking_id` — kasir bisa pilih manual booking hari itu untuk di-link ke order (dipakai buat bedain revenue reservasi vs walk-in di analytics, lihat FR-DASH-05).
 - **Priority**: P0
 
 #### FR-POS-02: Bill & Payment
-- **Description**: `GET /admin/orders/:id/bill` generate bill breakdown. `PATCH /admin/orders/:id` update `payment_status` unpaid → paid.
+- **Description**: `GET /admin/orders/:id/bill` generate bill breakdown, termasuk header resto (`restaurant.name/address/phone/email`) dan `paid_at` — dipakai juga sebagai sumber data struk cetak. `PATCH /admin/orders/:id` update `payment_status` unpaid → paid (single order).
 - **Priority**: P0
 
 #### FR-POS-03: Order History
-- **Description**: `GET /admin/orders?date=&table_id=&status=&customer_phone=&page=&limit=` — paginated (default `page=1`, `limit=20`, max `limit=100`).
+- **Description**: `GET /admin/orders?date=&table_id=&status=&payment_status=&paid_from=&paid_to=&customer_phone=&page=&limit=` — paginated (default `page=1`, `limit=20`, max `limit=100`). `payment_status`/`paid_from`/`paid_to` dipakai Riwayat Struk di halaman Keuangan.
+- **Priority**: P1
+
+#### FR-POS-04: Split-Bill & Struk Gabungan
+- **Description**: `POST /admin/orders/pay-batch` — bayar beberapa order di satu meja sekaligus (mis. 2 keluarga beda struk yang digabung jadi 1 transaksi). Server generate satu `payment_group_id` + `paid_at` yang identik untuk semua order terpilih (atomic transaction). Laporan keuangan (`order_count` di FR-DASH-04) menghitung grup ini sebagai **1 transaksi**, bukan N.
 - **Priority**: P1
 
 ### 4.4 Kitchen (Admin)
@@ -203,6 +207,18 @@ Backend melayani dua kategori client, keduanya lewat frontend Next.js:
 #### FR-DASH-03: Menu Performance
 - **Description**: `GET /admin/analytics/menu-performance?range=today|week` — order count per menu item.
 - **Priority**: P1
+
+#### FR-DASH-04: Revenue Report (Keuangan)
+- **Description**: `GET /admin/analytics/revenue?period=week|month|year&date=` — summary (`total_revenue`, `order_count`, `avg_order_value`), `previous_period` (growth % vs periode sebelumnya, `null` kalau periode sebelumnya 0), `by_category` (breakdown Food/Beverages/Dessert), `by_hour` (revenue per jam operasional 08:00-21:00), `series` (per hari untuk week/month, per bulan untuk year). `order_count` menghitung struk gabungan (FR-POS-04) sebagai 1 transaksi.
+- **Priority**: P1
+
+#### FR-DASH-05: Reservation Analytics
+- **Description**: `GET /admin/analytics/reservations?period=week|month|year&date=` — okupansi rata-rata periode, no-show rate (penyebut = booking `completed`+`no_show` saja) + estimasi revenue hilang (`no_show_count × avg_order_value`), waktu pemesanan favorit (per hari-minggu & per jam).
+- **Priority**: P2
+
+#### FR-DASH-06: Menu Financial Performance
+- **Description**: `GET /admin/analytics/menu-financials?period=week|month|year&date=` — qty terjual & revenue per menu item aktif (dari order **lunas** saja, beda dari FR-DASH-03 yang all-orders), termasuk item yang belum pernah dipesan (qty 0, tidak disembunyikan). Plus `cross_sell`: top 10 pasangan item yang sering dipesan bareng.
+- **Priority**: P2
 
 ### 4.8 Auth (Staff — better-auth)
 
@@ -528,6 +544,8 @@ model Order {
   total          Int      @default(0)
   status         String   @default("active") // active | completed | cancelled
   paymentStatus  String   @default("unpaid") @map("payment_status") // unpaid | paid
+  paidAt         DateTime? @map("paid_at") // set saat payment_status->paid; basis agregasi revenue (FR-DASH-04)
+  paymentGroupId String?   @map("payment_group_id") // sama utk order yg dibayar+dicetak bareng via pay-batch (FR-POS-04); null = dibayar sendiri
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -773,6 +791,7 @@ Middleware urutan: `requireAuth` → `requireRole(['owner', 'cashier', 'kitchen'
 ```json
 {
   "table_id": "uuid",
+  "booking_id": "uuid",
   "customer_phone": "081234567890",
   "items": [
     { "menu_item_id": "uuid", "qty": 2, "notes": "kurang pedas" },
@@ -780,14 +799,25 @@ Middleware urutan: `requireAuth` → `requireRole(['owner', 'cashier', 'kitchen'
   ]
 }
 ```
+`booking_id` opsional — kalau diisi, backend cuma validasi booking exists (404 `BOOKING_NOT_FOUND` kalau tidak), tanpa validasi meja harus sama persis dengan booking.
+
+#### `GET /admin/orders`
+**Roles:** owner, cashier
+**Query:** `?date=&table_id=&status=&payment_status=unpaid|paid&paid_from=&paid_to=&customer_phone=&page=&limit=`
+`payment_status`/`paid_from`/`paid_to` (YYYY-MM-DD) filter berdasar `paid_at`, independen dari `date` (yang filter `created_at`). Tiap order di response bawa `payment_group_id` & `paid_at` — dipakai Riwayat Struk buat grouping (satu `payment_group_id` = satu baris struk).
 
 #### `PATCH /admin/orders/:id`
 **Roles:** owner, cashier
-**Request:** `{ "payment_status": "paid" }`
+**Request:** `{ "payment_status": "paid" }` — set/reset `paid_at` & `payment_group_id` (null kalau balik ke unpaid).
+
+#### `POST /admin/orders/pay-batch`
+**Roles:** owner, cashier
+**Request:** `{ "order_ids": ["uuid", "uuid"] }` (min 1)
+**Response:** array order yang sudah ter-update — semua dapat `payment_status:"paid"`, `paid_at` & `payment_group_id` yang identik (satu grup = satu transaksi/struk gabungan).
 
 #### `GET /admin/orders/:id/bill`
 **Roles:** owner, cashier
-**Response:** items, qty, harga per item, subtotal, tax (10%), service charge (5%), total.
+**Response:** `restaurant` (name/address/phone/email), `paid_at`, items, qty, harga per item, subtotal, tax (10%), service charge (5%), total.
 
 #### `GET /admin/kitchen-queue`
 **Roles:** owner, kitchen
@@ -823,6 +853,59 @@ Middleware urutan: `requireAuth` → `requireRole(['owner', 'cashier', 'kitchen'
 
 #### `GET /admin/analytics/timeline` · `GET /admin/analytics/menu-performance`
 **Roles:** owner
+
+#### `GET /admin/analytics/revenue`
+**Roles:** owner
+**Query:** `?period=week|month|year&date=2026-07-10` (`period` default `month`)
+**Response:**
+```json
+{
+  "period": "month",
+  "range": { "start": "2026-07-01", "end": "2026-08-01" },
+  "summary": {
+    "total_revenue": 106835, "total_revenue_formatted": "$1,068.35",
+    "subtotal": 92900, "tax": 9290, "service_charge": 4645,
+    "order_count": 22, "avg_order_value": 4856, "avg_order_value_formatted": "$48.56"
+  },
+  "previous_period": { "total_revenue": 0, "total_revenue_formatted": "$0.00", "growth_percent": null },
+  "by_category": [ { "category_id": "uuid", "category": "Food", "revenue": 86900, "revenue_formatted": "$869.00", "qty_sold": 35 } ],
+  "by_hour": [ { "hour": "19:00", "revenue": 42780, "revenue_formatted": "$427.80" } ],
+  "series": [ { "bucket": "2026-07-17", "label": "17", "revenue": 28060, "revenue_formatted": "$280.60", "order_count": 6 } ]
+}
+```
+`order_count` (summary & series) dihitung distinct `payment_group_id ?? id` — struk gabungan (FR-POS-04) = 1 transaksi. `growth_percent` = `null` kalau `previous_period.total_revenue` 0 (bukan dipaksa jadi angka).
+
+#### `GET /admin/analytics/reservations`
+**Roles:** owner
+**Query:** `?period=week|month|year&date=` (sama seperti `/revenue`)
+**Response:**
+```json
+{
+  "period": "month",
+  "range": { "start": "2026-07-01", "end": "2026-08-01" },
+  "occupancy": { "avg_rate_percent": 1 },
+  "no_show": { "count": 1, "resolved_count": 6, "rate_percent": 17, "estimated_lost_revenue": 4856, "estimated_lost_revenue_formatted": "$48.56" },
+  "popular_times": {
+    "by_day_of_week": [ { "day": "monday", "booking_count": 0 } ],
+    "by_hour": [ { "hour": "19:00", "booking_count": 7 } ]
+  }
+}
+```
+`no_show.rate_percent` penyebutnya `resolved_count` (booking `completed`+`no_show` saja) — booking `confirmed` (belum lewat) & `cancelled` tidak dihitung. `estimated_lost_revenue = no_show.count × avg_order_value` (periode yang sama, dari `/revenue`).
+
+#### `GET /admin/analytics/menu-financials`
+**Roles:** owner
+**Query:** `?period=week|month|year&date=` (sama seperti `/revenue`)
+**Response:**
+```json
+{
+  "period": "month",
+  "range": { "start": "2026-07-01", "end": "2026-08-01" },
+  "items": [ { "menu_item_id": "uuid", "name": "Mixed Rice Platter", "qty_sold": 15, "revenue": 37500, "revenue_formatted": "$375.00" } ],
+  "cross_sell": [ { "menu_item_a": { "id": "uuid", "name": "Crispy Fried Chicken" }, "menu_item_b": { "id": "uuid", "name": "Beef Rendang" }, "pair_count": 4 } ]
+}
+```
+`items` mencakup **semua** menu item aktif (`deletedAt: null`), termasuk yang belum pernah dipesan (`qty_sold: 0`) — beda dari `/menu-performance` yang cuma return item yang pernah ke-order. Dihitung dari order **lunas** saja (beda dari `/menu-performance` yang all-orders). `cross_sell` = top 10 pasangan item yang sering muncul bareng dalam 1 order lunas.
 
 ---
 
@@ -1019,6 +1102,7 @@ requireRole([...])   // cek field role user vs daftar role yang diizinkan
 | 2.0 | 2026-07-07 | Pisah jadi PRD backend-only. Migrasi Supabase → Neon + Prisma. Auth Supabase → better-auth. Realtime Supabase → Socket.io. Storage Supabase → Cloudinary. Deploy Vercel → Railway (backend). | Technical Lead — Megatha Tech |
 | 2.1 | 2026-07-08 | Drop Socket.io/WebSocket sepenuhnya (sempat diimplementasi penuh, lalu dicabut). Deploy target backend pindah dari Railway ke **Vercel Functions** (serverless, tidak support koneksi persisten). Update kitchen/cashier diganti jadi **polling** (TanStack Query `refetchInterval`) — lihat §9. | Technical Lead — Megatha Tech |
 | 2.2 | 2026-07-08 | Semua endpoint & FR/POS/POS-02/POS-03/KIT/DASH selesai diimplementasi (kecuali AI Concierge). Currency diganti dari IDR ke **USD** (integer cents di seluruh nilai uang, lihat §7.4, §8.3). Tambah **NFR-SEC-08** rate limiting (`express-rate-limit`, 429 + `Retry-After`). Semua contoh response & seed data diselaraskan ke bahasa Inggris (nama meja, kategori, menu). `FR-POS-03` ditambah pagination. | Technical Lead — Megatha Tech |
+| 2.3 | 2026-07-17 | **Struk & Keuangan**: `Order.paidAt`+`paymentGroupId` (§7.2), `POST /admin/orders/pay-batch` (split-bill/struk gabungan, FR-POS-04), bill (`GET /admin/orders/:id/bill`) bawa header resto + `paid_at`. Fix bug lama `total_walk_ins` (order gak pernah ke-link booking) — `POST /admin/orders` terima `booking_id` opsional. 3 endpoint analytics baru: `GET /admin/analytics/revenue` (weekly/monthly/yearly + growth% + breakdown kategori + per jam, FR-DASH-04), `GET /admin/analytics/reservations` (okupansi/no-show/waktu favorit, FR-DASH-05), `GET /admin/analytics/menu-financials` (qty+revenue akurat dari order lunas + cross-sell, FR-DASH-06) — terpisah dari `/menu-performance` lama yang tetap dipakai Dashboard operasional. | Claude (AI pair programmer) |
 
 ---
 

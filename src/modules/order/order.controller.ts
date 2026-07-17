@@ -3,9 +3,10 @@ import {
   createOrderSchema,
   getOrdersQuerySchema,
   orderIdParamSchema,
+  payOrdersBatchSchema,
   updateOrderPaymentStatusSchema,
 } from './order.schema'
-import { createOrder, getOrderBill, listOrders, updateOrderPaymentStatus } from './order.service'
+import { createOrder, getOrderBill, listOrders, payOrdersBatch, updateOrderPaymentStatus } from './order.service'
 
 export async function postOrder(req: Request, res: Response) {
   const parsed = createOrderSchema.safeParse(req.body)
@@ -67,5 +68,19 @@ export async function patchOrderPaymentStatus(req: Request, res: Response) {
   }
 
   const data = await updateOrderPaymentStatus(paramsParsed.data.id, bodyParsed.data)
+  res.json({ success: true, data })
+}
+
+export async function postPayOrdersBatch(req: Request, res: Response) {
+  const parsed = payOrdersBatchSchema.safeParse(req.body)
+
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: parsed.error.issues[0]?.message ?? 'Invalid input.' },
+    })
+  }
+
+  const data = await payOrdersBatch(parsed.data.order_ids)
   res.json({ success: true, data })
 }

@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express'
 import { categoryIdParamSchema, createMenuCategorySchema, updateMenuCategorySchema } from './menu-category.schema'
-import { createCategory, listCategories, softDeleteCategory, updateCategory } from './menu-category.service'
+import { createCategory, deleteCategory, listCategories, updateCategory } from './menu-category.service'
 
 export async function getCategories(_req: Request, res: Response) {
   const data = await listCategories()
@@ -51,6 +51,6 @@ export async function deleteCategoryHandler(req: Request, res: Response) {
     })
   }
 
-  await softDeleteCategory(paramsParsed.data.id)
+  await deleteCategory(paramsParsed.data.id)
   res.status(204).send()
 }
