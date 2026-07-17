@@ -67,7 +67,7 @@ export async function deleteCategory(id: string) {
     throw new AppError(404, 'CATEGORY_NOT_FOUND', 'Menu category not found.')
   }
 
-  const menuItemCount = await prisma.menuItem.count({ where: { categoryId: id } })
+  const menuItemCount = await prisma.menuItem.count({ where: { categoryId: id, deletedAt: null } })
   if (menuItemCount > 0) {
     throw new AppError(
       409,
