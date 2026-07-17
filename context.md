@@ -173,4 +173,4 @@ Cookie session better-auth (`__Secure-better-auth.session_token`) **gak punya `D
 - **Rate limiter (`express-rate-limit`) masih in-memory** — belum pindah ke shared store (Redis/Upstash). Konsekuensi: limit gak konsisten lintas Vercel Function instance (tiap instance punya counter sendiri). Diterima buat sekarang (traffic rendah), bukan blocker.
 
 ### Env var yang WAJIB di Vercel (project backend)
-`DATABASE_URL` (pooler), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `FRONTEND_ORIGIN`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CRON_SECRET` — semua URL **tanpa trailing slash**. `NODE_ENV`/`PORT` gak perlu (Vercel/serverless handle otomatis), `DIRECT_URL` cuma dipakai migrasi manual dari lokal (bukan runtime).
+`DATABASE_URL` (pooler), `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `FRONTEND_ORIGIN`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `CRON_SECRET`, `GEMINI_API_KEY` — semua URL **tanpa trailing slash**. `NODE_ENV`/`PORT` gak perlu (Vercel/serverless handle otomatis), `DIRECT_URL` cuma dipakai migrasi manual dari lokal (bukan runtime).
