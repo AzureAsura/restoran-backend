@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenerativeAI, type ResponseSchema } from '@google/generative-ai'
 import { env } from '../config/env'
 
 const genAI = new GoogleGenerativeAI(env.geminiApiKey)
@@ -17,4 +17,12 @@ export async function embedText(text: string): Promise<number[]> {
 export async function generateChatResponse(prompt: string): Promise<string> {
   const result = await chatModel.generateContent(prompt)
   return result.response.text()
+}
+
+export function createJsonModel(systemInstruction: string, schema: ResponseSchema) {
+  return genAI.getGenerativeModel({
+    model: 'gemini-flash-latest',
+    systemInstruction,
+    generationConfig: { responseMimeType: 'application/json', responseSchema: schema },
+  })
 }

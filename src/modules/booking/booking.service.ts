@@ -69,7 +69,7 @@ function initialsOf(name: string) {
     .join('')
 }
 
-function assertWithinOperatingHours(openingHours: unknown, bookingDate: string, bookingTime: string) {
+export function assertWithinOperatingHours(openingHours: unknown, bookingDate: string, bookingTime: string) {
   const hours = openingHours as Record<string, string | undefined>
   const dayName = dayNameFromDate(bookingDate)
   const range = hours[dayName]
@@ -88,7 +88,7 @@ function assertWithinOperatingHours(openingHours: unknown, bookingDate: string, 
   }
 }
 
-async function findAvailableTable(
+export async function findAvailableTable(
   tx: Prisma.TransactionClient,
   restaurantId: string,
   partySize: number,

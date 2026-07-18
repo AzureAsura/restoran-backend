@@ -1,5 +1,6 @@
 import { Router } from 'express'
+import { postChatMessage } from './ai.controller'
 
 export const aiRouter = Router()
 
-// TODO: register endpoints — AI concierge endpoint — see backend.md §8.1 (POST /ai/chat), §10
+aiRouter.post('/chat', postChatMessage)

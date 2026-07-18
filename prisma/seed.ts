@@ -46,20 +46,24 @@ async function main() {
 
   const restaurant = await prisma.restaurant.create({
     data: {
-      name: 'Warung Bagas',
-      slug: 'warung-bagas',
+      name: 'Megatha Restaurant & Lounge',
+      slug: 'megatha',
       description: 'Traditional Indonesian eatery',
-      address: 'Jl. Mawar No. 5, Jakarta',
-      phone: '0812-3456-7890',
-      email: 'halo@warungbagas.id',
+      address: 'Jl. Sunset Road No. 88, Seminyak, Bali, Indonesia',
+      phone: '+62 361 123 4567',
+      email: 'info@megatha.com',
       openingHours: {
-        monday: '08:00-22:00',
-        tuesday: '08:00-22:00',
-        wednesday: '08:00-22:00',
-        thursday: '08:00-22:00',
-        friday: '08:00-22:00',
-        saturday: '08:00-23:00',
-        sunday: '08:00-23:00',
+        monday: '17:00-23:00',
+        tuesday: '17:00-23:00',
+        wednesday: '17:00-23:00',
+        thursday: '17:00-23:00',
+        // Landing page shows "Fri-Sun 16:00-00:00" (past midnight). Stored as
+        // 23:59 instead of 00:00 — assertWithinOperatingHours (booking.service.ts)
+        // compares HH:MM strings within the same calendar day, so a literal
+        // "00:00" close would make every time fail the `< close` check.
+        friday: '16:00-23:59',
+        saturday: '16:00-23:59',
+        sunday: '16:00-23:59',
       },
       settings: { hold_time_minutes: 15, tax_rate: 10, service_charge: 5 },
     },
@@ -291,9 +295,9 @@ async function main() {
     })),
   })
 
-  const owner = await createStaffAccount('Bagas Wirawan', 'owner@warungbagas.id', OWNER_SEED_PASSWORD, 'owner')
-  const cashier = await createStaffAccount('Siti Rahayu', 'cashier@warungbagas.id', CASHIER_SEED_PASSWORD, 'cashier')
-  const kitchen = await createStaffAccount('Joko Prasetyo', 'kitchen@warungbagas.id', KITCHEN_SEED_PASSWORD, 'kitchen')
+  const owner = await createStaffAccount('Made Wirawan', 'owner@megatha.com', OWNER_SEED_PASSWORD, 'owner')
+  const cashier = await createStaffAccount('Siti Rahayu', 'cashier@megatha.com', CASHIER_SEED_PASSWORD, 'cashier')
+  const kitchen = await createStaffAccount('Joko Prasetyo', 'kitchen@megatha.com', KITCHEN_SEED_PASSWORD, 'kitchen')
 
   console.log('Seed complete:', {
     restaurant: restaurant.name,

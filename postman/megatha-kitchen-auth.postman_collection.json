@@ -26,7 +26,7 @@
         "url": "{{baseUrl}}/api/auth/sign-in/email",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"email\": \"owner@warungbagas.id\",\n  \"password\": \"Owner#12345\"\n}"
+          "raw": "{\n  \"email\": \"owner@megatha.com\",\n  \"password\": \"Owner#12345\"\n}"
         }
       }
     },
@@ -65,7 +65,7 @@
         "url": "{{baseUrl}}/api/auth/sign-in/email",
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"email\": \"owner@warungbagas.id\",\n  \"password\": \"wrongpassword\"\n}"
+          "raw": "{\n  \"email\": \"owner@megatha.com\",\n  \"password\": \"wrongpassword\"\n}"
         }
       }
     },

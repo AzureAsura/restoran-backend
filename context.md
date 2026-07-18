@@ -16,9 +16,9 @@ npm run db:seed      # reset data ke seed bersih kalau perlu
 ```
 
 Login dev (di-seed via `prisma/seed.ts`, helper `createStaffAccount`):
-- Owner: `owner@warungbagas.id` / `Owner#12345`
-- Cashier: `cashier@warungbagas.id` / `Cashier#12345`
-- Kitchen: `kitchen@warungbagas.id` / `Kitchen#12345`
+- Owner: `owner@megatha.com` / `Owner#12345`
+- Cashier: `cashier@megatha.com` / `Cashier#12345`
+- Kitchen: `kitchen@megatha.com` / `Kitchen#12345`
 
 Testing manual pakai Postman collection di `backend/postman/` (`megatha-kitchen-auth` + `megatha-kitchen-core`) — selalu attach header `Origin: http://localhost:3000` buat request yang butuh cookie session (better-auth CSRF check, browser asli kirim otomatis tapi Postman/curl tidak).
 
@@ -116,10 +116,20 @@ Testing manual pakai Postman collection di `backend/postman/` (`megatha-kitchen-
 - `Cache-Control: no-store` (`src/middlewares/no-store.ts`) cuma dipasang di 3 endpoint yang literally di-poll: `GET /admin/kitchen-queue`, `GET /admin/bookings`, `GET /admin/orders`. **Belum diputuskan**: `GET /admin/tables` — `frontend.md` bilang ini juga di-poll tapi `backend.md` §9.1 gak nyebutin, belum di-add.
 - No-show detection dual-trigger: `node-cron` (`src/jobs/no-show-cron.ts`, cuma reliable di dev lokal) **dan** `POST /internal/cron/no-show` (HTTP endpoint, auth `CRON_SECRET` bearer, buat Vercel Cron). Deadline = `booking_date`+`booking_time` (jam Jakarta) + `hold_time_minutes` dari `restaurant.settings` (default 15).
 
+### RAG / vector_store (AI Concierge — `prisma/seed-vector-store.ts`)
+- **🔴 `idx_vector_store_embedding` (ivfflat) dibuat saat `vector_store` masih KOSONG** (migration `20260707054006`, jauh sebelum ada data RAG beneran). pgvector ivfflat nge-cluster baris ke "lists" berdasarkan data yang ada **saat index dibuat** — index yang dibangun di tabel kosong jadi gak punya cluster yang berarti, dan baris yang di-insert belakangan bisa "kesasar": index scan balikin **0 baris** untuk sebagian query walau datanya ada & cocok (diverifikasi manual — matiin index scan pakai `SET LOCAL enable_indexscan = off` bikin hasil balik normal & masuk akal, jadi bukan masalah data/embedding-nya).
+- **Fix**: `REINDEX INDEX idx_vector_store_embedding` dijalankan otomatis di akhir `seed-vector-store.ts`, tiap kali script itu di-rerun (yang emang selalu full-rebuild: `DELETE FROM vector_store` lalu insert ulang semua). Kalau nanti ada mekanisme insert baris satu-satu di luar script ini (Fase 11 `plan.md`: re-index hook pas menu diedit), REINDEX **belum tentu perlu tiap insert** — cuma wajib dipastikan lagi setelah bulk-rebuild kayak gini, atau kalau similarity search mulai kelihatan aneh (hasil kosong/gak relevan padahal data ada).
+- Chunk FAQ (`buildFaqChunks`) **sengaja DB-derived only** — semua angka/fakta diambil dari `restaurant.name/address/phone/email/openingHours/settings` yang beneran ada di DB, TIDAK ada kebijakan yang dikarang manual (parkir, smoking, dll) karena belum dikonfirmasi datanya. Prinsipnya: AI cuma boleh "tahu" hal yang memang benar adanya.
+- **Pola berulang 3x (jangan ulangi lagi tanpa mikir): "jangan andalkan pencarian semantik doang buat fakta kritis"** — data meja (Fase 7), kontak resto (Fase 9), daftar menu (Fase 10) semua awalnya cuma "boleh muncul kalau lolos similarity search", ternyata gak reliable (kejadian beneran 2-3x: `suggested_tables` kosong padahal ada meja, nomor telepon gak kesebut, dll). Fix-nya selalu sama: bikin chunk dari data ASLI (bukan hasil search), sertakan **tanpa syarat** ke `retrievedContext`, gak digantung ke intent apa pun. Kalau nambah fakta kritis baru ke prompt, pakai pola ini dari awal, jangan tunggu ketauan bug dulu.
+- **Struktur modul AI**: `src/modules/ai/ai.service.ts` pegang SEMUA logic terkait `vector_store`/Gemini (retrieval, prompt, re-index, dll) — modul lain (`menu.service.ts`) import fungsi dari situ, gak pernah duplikasi logic-nya sendiri. `src/lib/gemini.ts` tetap generik (cuma akses SDK, gak tau apa-apa soal domain restoran).
+- **SDK Gemini (`@google/generative-ai`) expose kelas error sendiri** (`GoogleGenerativeAIError` dan turunannya: `Fetch/Abort/RequestInput/ResponseError`) — pakai `instanceof` buat deteksi kegagalan Gemini secara presisi, jangan cocokin teks pesan error (rapuh). Juga expose token usage di `result.response.usageMetadata` (`promptTokenCount`/`candidatesTokenCount`/`totalTokenCount`) — kepake buat structured logging (`plan.md` Fase 12).
+- **🔴 Tier gratis Gemini (`gemini-flash-latest` → `gemini-3.5-flash`) cuma 20 request/HARI** (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`), bukan cuma soal RPM — kena beneran di tengah development (testing Fase 1-8 gabungan langsung exhaust kuota). Jauh di bawah trafik realistis produksi. **Wajib** cek upgrade billing/tier sebelum AI Concierge dipakai beneran, bukan cuma nice-to-have.
+- **`POST /ai/chat` logging**: tiap panggilan nge-log 1 baris JSON terstruktur (`console.log`, ketangkep sama log platform kayak `morgan` existing — `event: "ai_chat"`, isinya `message`/`intent`/`retrievedCount`/`action`/`elapsedMs`/`tokenUsage`, atau `error: "gemini_failure"` kalau Gemini gagal) — log-only, gak ada tabel DB baru (konsisten desain stateless).
+
 ### Bahasa & Konten (semua user-facing string = English)
 - Semua pesan error/validasi + data bisnis (nama menu, deskripsi, dll) sudah bahasa Inggris.
 - **Comment kode (`//`) TIDAK ikut diterjemahkan** — biarkan apa adanya kalau nemu yang masih bahasa Indonesia.
-- **Proper noun/identitas tidak diterjemahkan**: nama resto (`Warung Bagas`), alamat, nama staff, email/phone.
+- **Proper noun/identitas tidak diterjemahkan**: nama resto (`Megatha Restaurant & Lounge`), alamat, nama staff, email/phone.
 - **Nama hidangan yang dikenal luas internasional dipertahankan** (`Gado-Gado`, `Klepon`) — cuma deskripsinya bahasa Inggris (pola umum menu restoran, mirip gak nerjemahin "Sushi"/"Tacos").
 - **`phoneRegex` tetap format Indonesia (`08xx`)** — app tetap ngelayanin customer Indonesia meski UI-nya Inggris, ini gak berubah cuma karena bahasa UI berubah.
 

@@ -1,7 +1,27 @@
 import { prisma } from '../../lib/prisma'
 import { deleteMenuImage } from '../../lib/cloudinary'
 import { AppError } from '../../utils/app-error'
+import { deleteMenuItemEmbedding, upsertMenuItemEmbedding } from '../ai/ai.service'
 import type { CreateMenuItemInput, GetMenuQuery, UpdateMenuItemInput } from './menu.schema'
+
+function reindexMenuItem(item: { id: string; name: string; price: number; description: string | null; tags: string[]; category: { name: string } }) {
+  upsertMenuItemEmbedding({
+    id: item.id,
+    name: item.name,
+    price: item.price,
+    description: item.description,
+    tags: item.tags,
+    categoryName: item.category.name,
+  }).catch((err) => {
+    console.error(`[vector_store] Failed to re-index menu item ${item.id}:`, err)
+  })
+}
+
+function deindexMenuItem(id: string) {
+  deleteMenuItemEmbedding(id).catch((err) => {
+    console.error(`[vector_store] Failed to remove menu item ${id} from index:`, err)
+  })
+}
 
 function toMenuItemDTO(item: {
   id: string
@@ -107,6 +127,8 @@ export async function createMenuItem(input: CreateMenuItemInput, imageUrl: strin
     include: { category: { select: { id: true, name: true } } },
   })
 
+  reindexMenuItem(item)
+
   return toMenuItemDTO(item)
 }
 
@@ -139,6 +161,8 @@ export async function updateMenuItem(id: string, input: UpdateMenuItemInput, ima
     await deleteMenuImage(existing.imageUrl)
   }
 
+  reindexMenuItem(item)
+
   return toMenuItemDTO(item)
 }
 
@@ -149,6 +173,8 @@ export async function softDeleteMenuItem(id: string) {
   }
 
   await prisma.menuItem.update({ where: { id }, data: { deletedAt: new Date() } })
+
+  deindexMenuItem(id)
 
   if (existing.imageUrl) {
     await deleteMenuImage(existing.imageUrl)
