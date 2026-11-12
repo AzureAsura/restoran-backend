@@ -545,7 +545,13 @@ export async function handleChatMessage(input: ChatMessageInput): Promise<ChatRe
     return result
   } catch (err) {
     if (isGeminiFailure(err)) {
-      logChatCall({ message: input.message, intent, elapsedMs: Date.now() - startedAt, error: 'gemini_failure' })
+      logChatCall({
+        message: input.message,
+        intent,
+        elapsedMs: Date.now() - startedAt,
+        error: 'gemini_failure',
+        detail: err instanceof Error ? err.message : String(err),
+      })
       return { response: buildGeminiFallbackMessage(restaurant.phone), action: 'none', suggested_tables: [] }
     }
     throw err
